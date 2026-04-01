@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EXPRCOMP — Expression Compiler Visualizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;0,9..144,900;1,9..144,400&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+<!-- ── Ambient Background ── -->
+<div class="bg-layer" aria-hidden="true">
+  <div class="bg-mesh"></div>
+  <div class="bg-dots"></div>
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+  <canvas id="circuit-canvas"></canvas>
+</div>
+
+<!-- ── Loading Overlay ── -->
+<div id="loading-overlay" class="loading-overlay hidden">
+  <div class="loading-inner">
+    <div class="loader-rings">
+      <div class="ring ring-1"></div>
+      <div class="ring ring-2"></div>
+      <div class="ring ring-3"></div>
+      <div class="loader-core">
+        <span class="loader-icon">⚙</span>
+      </div>
+    </div>
+    <p class="loader-text">Compiling pipeline<span class="blink-dots">...</span></p>
+    <div class="loader-stages">
+      <span id="loader-stage-label">Initializing lexer…</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── App Shell ── -->
+<div class="app-shell">
+
+  <!-- ══ HEADER ══ -->
+  <header class="app-header">
+
+    <div class="header-brand">
+      <h1 class="brand-title">
+        <img
+          class="brand-logo"
+          src="{{ url_for('static', filename='img/amrita-logo.png') }}"
+          alt="Amrita Vishwa Vidyapeetham"
+          decoding="async"
+          loading="eager"
+        />
+      </h1>
+      <p class="brand-desc">20CYS315 - Automata Theory and Compiler Design</p>
+    </div>
+
+    <div class="header-controls">
+
+      <!-- Input -->
+      <div class="input-group">
+        <div class="input-prefix">
+          <span class="input-prompt">❯_</span>
+        </div>
+        <input
+          id="expr-input"
+          type="text"
+          placeholder="5 + 2.5 * 2"
+          autocomplete="off"
+          spellcheck="false"
+          class="expr-input"
+        />
+        <button id="btn-compile" type="button" class="btn-compile">
+          <span class="btn-compile-text">COMPILE</span>
+          <span class="btn-compile-arrow">→</span>
+        </button>
+      </div>
+
+      <!-- Quick tests -->
+      <div class="test-cases">
+        <span class="tc-label">QUICK TESTS</span>
+        <div class="tc-pills">
+          <button class="tc-pill" onclick="setExpr('5 + 2.5 * 2')">TC1</button>
+          <button class="tc-pill" onclick="setExpr('10 / 4')">TC2</button>
+          <button class="tc-pill" onclick="setExpr('3.14 * 2.0 + 1')">TC3</button>
+          <button class="tc-pill" onclick="setExpr('100 + 200 - 50')">TC4</button>
+          <button class="tc-pill tc-err" onclick="setExpr('9.9 / 0')">TC5 ✗</button>
+          <button class="tc-pill tc-err" onclick="setExpr('5 + abc')">TC6 ✗</button>
+          <button class="tc-pill" onclick="setExpr('(3 + 4) * (2 - 1)')">TC7</button>
+        </div>
+      </div>
+
+      <!-- Walkthrough controls -->
+      <div class="walkthrough-row">
+        <button id="btn-play"  type="button" class="wt-btn wt-play">▶ PLAY TOUR</button>
+        <button id="btn-pause" type="button" class="wt-btn">⏸ PAUSE</button>
+        <button id="btn-step"  type="button" class="wt-btn">STEP →</button>
+        <button id="btn-report-pdf" type="button" class="wt-btn">⬇ WORKFLOW PDF</button>
+        <button id="theme-toggle" type="button" class="wt-btn theme-toggle" aria-label="Toggle theme" title="Toggle light/dark">
+          <span class="theme-ic" aria-hidden="true">
+            <!-- icon injected by JS -->
+          </span>
+        </button>
+        <div id="top-result-bar" class="top-result-bar hidden" aria-live="polite">
+          <span class="tr-icon" aria-hidden="true">◎</span>
+          <span class="tr-label">RESULT</span>
+          <span id="top-result-value" class="tr-value">—</span>
+          <span class="tr-sep">|</span>
+          <span class="tr-label">TYPE</span>
+          <span id="top-result-type" class="tr-type">—</span>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-track">
+            <div id="progress-fill" class="progress-fill" style="width:0%"></div>
+          </div>
+          <span id="progress-label" class="progress-label">0%</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="header-tagline" aria-label="Product tagline">
+      <div class="brand-name">LexiCore</div>
+      <div class="brand-tagline">
+        Interactive Compiler Pipeline Visualizer<br />
+        Analyze tokens, AST, optimization, and code generation in real time
+      </div>
+    </div>
+  </header>
+
+  <!-- ══ ERROR BANNER ══ -->
+  <div id="error-banner" class="error-banner hidden"></div>
+
+  <!-- ══ BODY ══ -->
+  <div class="app-body">
+
+    <!-- Stage Rail -->
+    <aside class="stage-rail">
+      <div class="rail-title">PIPELINE</div>
+      <nav id="stage-nav" class="rail-nav"></nav>
+      <div class="rail-footer">
+        <div id="rail-result-mini" class="rail-result-mini hidden">
+          <span class="rm-label">RESULT</span>
+          <span id="rm-val" class="rm-val">—</span>
+          <span id="rm-type" class="rm-type">—</span>
+        </div>
+        <button id="rail-codegen-link" type="button" class="rail-btn rail-btn-codegen" aria-label="Jump to Code Generator">
+          <span class="rail-n">CG</span>
+          <span class="rail-info">
+            <span class="rail-name">Code Generator</span>
+            <span class="rail-tip">Expression/TAC/C++ tools</span>
+          </span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Stages Main -->
+    <main class="stages-main">
+
+      <!-- Stage 01: Lexical Analysis -->
+      <section class="stage-card" id="stage-0" data-stage="0">
+        <div class="stage-header">
+          <div class="stage-num">01</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Lexical Analysis</h2>
+            <p class="stage-sub">Scanner — characters → token stream</p>
+          </div>
+          <div class="stage-status" id="st-0">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div class="section-label">TOKEN STREAM</div>
+          <div id="out-tokens" class="token-stream"></div>
+          <div class="token-legend">
+            <span class="tl-item tl-int">INT</span>
+            <span class="tl-item tl-float">FLOAT</span>
+            <span class="tl-item tl-op">OPERATOR</span>
+            <span class="tl-item tl-paren">PAREN</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stage 02: Syntax Analysis -->
+      <section class="stage-card" id="stage-1" data-stage="1">
+        <div class="stage-header">
+          <div class="stage-num">02</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Syntax Analysis</h2>
+            <p class="stage-sub">Recursive descent parser → Abstract Syntax Tree</p>
+          </div>
+          <div class="stage-status" id="st-1">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div class="section-label">AST VISUALIZATION</div>
+          <div id="out-ast" class="ast-wrap"></div>
+        </div>
+      </section>
+
+      <!-- Stage 03: AST Optimization -->
+      <section class="stage-card" id="stage-2" data-stage="2">
+        <div class="stage-header">
+          <div class="stage-num">03</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">AST Optimization</h2>
+            <p class="stage-sub">Constant folding — inner subtrees collapse to literals</p>
+          </div>
+          <div class="stage-status" id="st-2">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div class="fold-note">▼ Folded nodes shown in amber — root preserved for type shape</div>
+          <div id="out-ast-opt" class="ast-wrap"></div>
+        </div>
+      </section>
+
+      <!-- Stage 04: TAC -->
+      <section class="stage-card" id="stage-3" data-stage="3">
+        <div class="stage-header">
+          <div class="stage-num">04</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Intermediate Code — TAC</h2>
+            <p class="stage-sub">Three-address code: result = arg1 op arg2</p>
+          </div>
+          <div class="stage-status" id="st-3">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div class="section-label">THREE-ADDRESS QUADRUPLES</div>
+          <div id="out-tac" class="tac-block"></div>
+        </div>
+      </section>
+
+      <!-- Stage 05: IR Optimization -->
+      <section class="stage-card" id="stage-4" data-stage="4">
+        <div class="stage-header">
+          <div class="stage-num">05</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">IR Optimization</h2>
+            <p class="stage-sub">Peephole — fold literal-on-literal TAC instructions</p>
+          </div>
+          <div class="stage-status" id="st-4">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div class="diff-grid">
+            <div class="diff-col">
+              <div class="diff-label diff-before">BEFORE</div>
+              <pre id="out-ir-before" class="code-block cb-dim"></pre>
+            </div>
+            <div class="diff-arrow">⇒</div>
+            <div class="diff-col">
+              <div class="diff-label diff-after">AFTER</div>
+              <pre id="out-ir-after" class="code-block cb-lit"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stage 06: Instruction Selection -->
+      <section class="stage-card" id="stage-5" data-stage="5">
+        <div class="stage-header">
+          <div class="stage-num">06</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Instruction Selection</h2>
+            <p class="stage-sub">TAC → MOV / ALU / MOV micro-operations</p>
+          </div>
+          <div class="stage-status" id="st-5">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div id="out-isel" class="isel-list"></div>
+        </div>
+      </section>
+
+      <!-- Stage 07: Register Allocation -->
+      <section class="stage-card" id="stage-6" data-stage="6">
+        <div class="stage-header">
+          <div class="stage-num">07</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Register Allocation</h2>
+            <p class="stage-sub">R0/R1 binding snapshot after load phase</p>
+          </div>
+          <div class="stage-status" id="st-6">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div id="out-reg" class="reg-grid"></div>
+        </div>
+      </section>
+
+      <!-- Stage 08: Scheduling -->
+      <section class="stage-card" id="stage-7" data-stage="7">
+        <div class="stage-header">
+          <div class="stage-num">08</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Instruction Scheduling</h2>
+            <p class="stage-sub">Interleaved issue order — pipeline stall reduction</p>
+          </div>
+          <div class="stage-status" id="st-7">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div class="diff-grid">
+            <div class="diff-col">
+              <div class="diff-label diff-before">PROGRAM ORDER</div>
+              <ul id="out-sched-before" class="sched-list"></ul>
+            </div>
+            <div class="diff-arrow">⇒</div>
+            <div class="diff-col">
+              <div class="diff-label diff-after">SCHEDULED</div>
+              <ul id="out-sched-after" class="sched-list sched-after"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stage 09: Assembly -->
+      <section class="stage-card" id="stage-8" data-stage="8">
+        <div class="stage-header">
+          <div class="stage-num">09</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Assembly Code</h2>
+            <p class="stage-sub">Target: R0/R1 register machine instructions</p>
+          </div>
+          <div class="stage-status" id="st-8">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <pre id="out-asm" class="code-block asm-block"></pre>
+        </div>
+      </section>
+
+      <!-- Stage 10: Machine Code -->
+      <section class="stage-card" id="stage-9" data-stage="9">
+        <div class="stage-header">
+          <div class="stage-num">10</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Machine Code</h2>
+            <p class="stage-sub">Binary encoding — 32-bit words per instruction</p>
+          </div>
+          <div class="stage-status" id="st-9">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div id="out-machine" class="machine-block"></div>
+        </div>
+      </section>
+
+      <!-- Final Result -->
+      <section class="stage-card result-card" id="stage-result">
+        <div class="result-inner">
+          <div class="result-decoration">
+            <div class="res-ring res-ring-1"></div>
+            <div class="res-ring res-ring-2"></div>
+            <div class="res-ring res-ring-3"></div>
+            <div class="res-core-dot"></div>
+          </div>
+          <div class="result-content">
+            <div class="result-meta-label">COMPILATION RESULT</div>
+            <div class="result-main">
+              <div class="result-value-wrap">
+                <span class="result-label">VALUE</span>
+                <span id="final-result" class="result-value">—</span>
+              </div>
+              <div class="result-divider"></div>
+              <div class="result-type-wrap">
+                <span class="result-label">TYPE</span>
+                <span id="final-type" class="result-type">—</span>
+              </div>
+            </div>
+            <div id="result-tac-summary" class="result-tac hidden">
+              <div class="section-label" style="margin-bottom:8px;">TAC SUMMARY</div>
+              <pre id="result-tac-lines" class="code-block" style="margin:0;font-size:11px;"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Automata Generator -->
+      <section class="stage-card" id="stage-10" data-stage="10">
+        <div class="stage-header">
+          <div class="stage-num">AG</div>
+          <div class="stage-meta">
+            <h2 class="stage-title">Automata Generator</h2>
+            <p class="stage-sub">Generate DFA/NFA, visualize transitions, export JFLAP (.jff)</p>
+          </div>
+          <div class="stage-status" id="st-10">PENDING</div>
+        </div>
+        <div class="stage-body">
+          <div class="auto-grid">
+            <div class="auto-left">
+              <div class="section-label">MODE</div>
+              <div class="auto-toggle" role="tablist" aria-label="Automata mode">
+                <button id="auto-mode-tokens" type="button" class="auto-pill active">DFA from Tokens</button>
+                <button id="auto-mode-regex" type="button" class="auto-pill">Regex → NFA → DFA</button>
+              </div>
+
+              <div class="auto-field">
+                <label class="auto-label" for="auto-input">Input</label>
+                <textarea id="auto-input" class="auto-input" rows="3" placeholder="Mode 1: 5 + 2.5 * 2&#10;Mode 2: (a|b)*abb"></textarea>
+                <div class="auto-hint">Tip: Number DFA is fixed (int/float). Regex mode supports literals, (), |, concatenation, and *.</div>
+              </div>
+
+              <div class="auto-actions">
+                <button id="auto-generate" type="button" class="auto-btn primary">Generate Automata</button>
+                <button id="auto-export" type="button" class="auto-btn">Export as JFLAP (.jff)</button>
+              </div>
+
+              <div class="auto-sim">
+                <div class="section-label" style="margin-top:18px;">SIMULATION (DFA)</div>
+                <div class="auto-sim-row">
+                  <input id="auto-sim-input" class="auto-sim-input" type="text" placeholder="Try: 123, 12.34, 12." />
+                  <button id="auto-sim-run" class="auto-btn" type="button">Run</button>
+                  <button id="auto-sim-step" class="auto-btn" type="button">Step</button>
+                  <button id="auto-sim-reset" class="auto-btn" type="button">Reset</button>
+                </div>
+                <div id="auto-sim-status" class="auto-sim-status">—</div>
+              </div>
+
+              <details class="auto-json">
+                <summary class="auto-json-sum">Automata JSON model</summary>
+                <pre id="auto-json-out" class="code-block cb-dim" style="margin-top:10px; max-height: 260px; overflow:auto;"></pre>
+              </details>
+            </div>
+
+            <div class="auto-right">
+              <div class="auto-legend">
+                <span class="lg-item"><span class="lg-dot start"></span> Start</span>
+                <span class="lg-item"><span class="lg-dot accept"></span> Accept</span>
+                <span class="lg-item"><span class="lg-dot normal"></span> Normal</span>
+              </div>
+              <div id="auto-cy" class="auto-cy" aria-label="Automata graph"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Code Generator Module (isolated) -->
+      <section class="cg-module" id="code-generator">
+        <div class="cg-head">
+          <div>
+            <h2 class="cg-title">Code Generator</h2>
+            <p class="cg-sub">Expression/TAC/C++ conversion and C++ export</p>
+          </div>
+          <span class="cg-badge">Independent Module</span>
+        </div>
+
+        <div class="cg-grid">
+          <div class="cg-left">
+            <div class="cg-row">
+              <button type="button" class="cg-mode active" data-cg-mode="expr2cpp">Expression → C++</button>
+              <button type="button" class="cg-mode" data-cg-mode="tac2cpp">TAC → C++</button>
+              <button type="button" class="cg-mode" data-cg-mode="cpp2expr">C++ → Expression</button>
+            </div>
+
+            <label class="cg-label" for="cg-input">Input</label>
+            <textarea id="cg-input" class="cg-input" rows="9" placeholder="5 + 2.5 * 2"></textarea>
+            <div id="cg-type" class="cg-type">Detected type: —</div>
+            <div id="cg-error" class="cg-error hidden"></div>
+
+            <div class="cg-actions">
+              <button id="cg-generate" type="button" class="cg-btn primary">Generate</button>
+              <button id="cg-reverse" type="button" class="cg-btn">Reverse</button>
+              <button id="cg-download" type="button" class="cg-btn">Download .cpp</button>
+              <button id="cg-copy" type="button" class="cg-btn">Copy</button>
+            </div>
+          </div>
+
+          <div class="cg-right">
+            <div class="cg-code-head">
+              <span>Output (C++)</span>
+            </div>
+            <div class="cg-code-wrap">
+              <div id="cg-lines" class="cg-lines"></div>
+              <pre id="cg-output" class="cg-output"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div><!-- /.app-body -->
+
+</div><!-- /.app-shell -->
+
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+<script src="{{ url_for('static', filename='js/codeGenerator.js') }}"></script>
+</body>
+</html>

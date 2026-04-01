@@ -1,0 +1,28 @@
+# Build outputs
+build/
+*.o
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.out
+compiler
+
+# CMake / Visual Studio
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.tlog
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+
